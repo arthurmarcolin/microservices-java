@@ -45,7 +45,8 @@ public class ProductController {
         } else {
             String nameCache = "ConvertedValue";
             String keyCache = entity.getCurrency() + "-" + targetCurrency;
-            Double convertedValue = cacheManager.getCache(nameCache).get(keyCache, Double.class);
+            //Double convertedValue = cacheManager.getCache(nameCache).get(keyCache, Double.class);
+            Double convertedValue = null;
             if (convertedValue == null) {
                 CurrencyResponse currency = currencyClient.getCurrency(entity.getCurrency(), targetCurrency);
                 if (currency != null) {
