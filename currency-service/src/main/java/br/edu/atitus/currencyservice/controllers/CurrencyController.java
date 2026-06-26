@@ -7,12 +7,15 @@ import br.edu.atitus.currencyservice.entities.CurrencyEntity;
 import br.edu.atitus.currencyservice.repositories.CurrencyRepository;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
-import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.time.DayOfWeek;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 
 @RestController
 @RequestMapping("currency")
@@ -55,15 +58,16 @@ public class CurrencyController {
                currency.setConversionRate(1.0);
            } else {
                try {
+                   String data = getRecentBusinessDay();
                    Double sourceRate = 1.0;
                    Double targetRate = 1.0;
                    if (!source.equals("BRL")) {
-                       BCBResponse response = bcbClient.getBCBCurrency(source);
+                       BCBResponse response = bcbClient.getBCBCurrency(source, data);
                        if (response.value().isEmpty()) throw new Exception("Currency not found for " + source);
                        sourceRate = response.value().get(0).cotacaoVenda();
                    }
                    if (!target.equals("BRL")) {
-                       BCBResponse response = bcbClient.getBCBCurrency(target);
+                       BCBResponse response = bcbClient.getBCBCurrency(target, data);
                        if (response.value().isEmpty()) throw new Exception("Currency not found for " + target);
                        targetRate = response.value().get(0).cotacaoVenda();
                    }
@@ -88,5 +92,18 @@ public class CurrencyController {
         );
 
         return ResponseEntity.ok(dto);
+    }
+
+    private String getRecentBusinessDay() {
+        LocalDate date = LocalDate.now();
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("MM-dd-yyyy");
+        for (int i = 0; i < 7; i++) {
+            DayOfWeek dow = date.getDayOfWeek();
+            if (dow != DayOfWeek.SATURDAY && dow != DayOfWeek.SUNDAY) {
+                return date.format(formatter);
+            }
+            date = date.minusDays(1);
+        }
+        return LocalDate.now().minusDays(2).format(formatter);
     }
 }

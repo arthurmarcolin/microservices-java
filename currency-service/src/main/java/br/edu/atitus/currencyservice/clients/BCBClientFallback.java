@@ -7,7 +7,7 @@ import java.util.List;
 public class BCBClientFallback implements BCBClient{
 
     @Override
-    public BCBResponse getBCBCurrency(String MOEDA) {
+    public BCBResponse getBCBCurrency(String MOEDA, String DATA) {
         return new BCBResponse(List.of());
     }
 }

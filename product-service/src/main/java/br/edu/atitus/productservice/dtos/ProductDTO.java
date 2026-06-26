@@ -10,6 +10,12 @@ public record ProductDTO(
         Integer stock,
         Double convertedPrice,
         String environment,
-        String requestCurrency
+        String requestCurrency,
+        String sellerId,
+        String sellerName,
+        String categoria,
+        String condicao,
+        String cidade,
+        String estado
 ) {
 }

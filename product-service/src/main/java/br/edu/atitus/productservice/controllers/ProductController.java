@@ -2,6 +2,7 @@ package br.edu.atitus.productservice.controllers;
 
 import br.edu.atitus.productservice.clients.CurrencyClient;
 import br.edu.atitus.productservice.clients.CurrencyResponse;
+import br.edu.atitus.productservice.dtos.ProductCreateRequest;
 import br.edu.atitus.productservice.dtos.ProductDTO;
 import br.edu.atitus.productservice.entities.ProductEntity;
 import br.edu.atitus.productservice.repositories.ProductRepository;
@@ -10,9 +11,13 @@ import org.springframework.cache.CacheManager;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
+
 @RestController
 @RequestMapping("products")
 public class ProductController {
+
+    private static final double USD_TO_BRL_FALLBACK = 5.75;
 
     private final ProductRepository repository;
     private final CurrencyClient currencyClient;
@@ -27,25 +32,37 @@ public class ProductController {
     @Value("${server.port}")
     private String port;
 
+    // ── GET /products?q= ────────────────────────────────────────────────────────
+    @GetMapping
+    public ResponseEntity<List<ProductDTO>> getAll(
+            @RequestParam(required = false) String q) {
+
+        List<ProductEntity> entities = (q != null && !q.isBlank())
+                ? repository.search(q.trim())
+                : repository.findAll();
+
+        List<ProductDTO> dtos = entities.stream().map(e -> toDTO(e, convertPrice(e))).toList();
+        return ResponseEntity.ok(dtos);
+    }
+
+    // ── GET /products/{id}?targetCurrency= ──────────────────────────────────────
     @GetMapping("/{id}")
     public ResponseEntity<ProductDTO> getProduct(
             @PathVariable Long id,
             @RequestParam String targetCurrency) throws Exception {
-        targetCurrency = targetCurrency.toUpperCase();
 
+        targetCurrency = targetCurrency.toUpperCase();
         ProductEntity entity = repository.findById(id)
                 .orElseThrow(() -> new Exception("Product not found!"));
 
-        Double convertedPrice = null;
+        Double convertedPrice;
         String environment = "Product-service running on port: " + port;
-        String requestCurrency = targetCurrency;
 
         if (targetCurrency.equals(entity.getCurrency())) {
             convertedPrice = entity.getPrice();
         } else {
             String nameCache = "ConvertedValue";
             String keyCache = entity.getCurrency() + "-" + targetCurrency;
-            //Double convertedValue = cacheManager.getCache(nameCache).get(keyCache, Double.class);
             Double convertedValue = null;
             if (convertedValue == null) {
                 CurrencyResponse currency = currencyClient.getCurrency(entity.getCurrency(), targetCurrency);
@@ -57,32 +74,91 @@ public class ProductController {
                     convertedPrice = -1.0;
                     environment = environment + " - Currency Fallback";
                 }
-            }else {
+            } else {
                 convertedPrice = convertedValue * entity.getPrice();
                 environment = environment + " - Currency in cache";
             }
         }
 
-        ProductDTO dto = new ProductDTO(
-                entity.getId(),
-                entity.getDescription(),
-                entity.getBrand(),
-                entity.getModel(),
-                entity.getCurrency(),
-                entity.getPrice(),
-                entity.getStock(),
-                convertedPrice,
-                environment,
-                requestCurrency
-        );
+        return ResponseEntity.ok(toDTO(entity, convertedPrice));
+    }
 
-        return ResponseEntity.ok(dto);
+    // ── PUT /ws/product/{id} — protegido via JWT no gateway ─────────────────────
+    @PutMapping("/ws/product/{id}")
+    public ResponseEntity<ProductDTO> updateProduct(@PathVariable Long id, @RequestBody ProductCreateRequest req) throws Exception {
+        ProductEntity e = repository.findById(id)
+                .orElseThrow(() -> new Exception("Product not found!"));
+        if (req.description() != null) e.setDescription(req.description());
+        if (req.brand() != null)       e.setBrand(req.brand());
+        if (req.model() != null)       e.setModel(req.model());
+        if (req.price() != null)       e.setPrice(req.price());
+        if (req.stock() != null)       e.setStock(req.stock());
+        if (req.categoria() != null)   e.setCategoria(req.categoria());
+        if (req.condicao() != null)    e.setCondicao(req.condicao());
+        if (req.cidade() != null)      e.setCidade(req.cidade());
+        if (req.estado() != null)      e.setEstado(req.estado());
+        ProductEntity saved = repository.save(e);
+        return ResponseEntity.ok(toDTO(saved, saved.getPrice()));
+    }
+
+    // ── DELETE /ws/product/{id} — protegido via JWT no gateway ──────────────────
+    @DeleteMapping("/ws/product/{id}")
+    public ResponseEntity<Void> deleteProduct(@PathVariable Long id) throws Exception {
+        if (!repository.existsById(id)) throw new Exception("Product not found!");
+        repository.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    // ── POST /products ───────────────────────────────────────────────────────────
+    @PostMapping
+    public ResponseEntity<ProductDTO> createProduct(@RequestBody ProductCreateRequest req) {
+        ProductEntity e = new ProductEntity();
+        e.setDescription(req.description());
+        e.setBrand(req.brand() != null ? req.brand() : (req.sellerName() != null ? req.sellerName() : "Anúncio"));
+        e.setModel(req.model() != null ? req.model() : "");
+        e.setCurrency("BRL");
+        e.setPrice(req.price() != null ? req.price() : 0.0);
+        e.setStock(req.stock() != null ? req.stock() : 1);
+        e.setSellerId(req.sellerId());
+        e.setSellerName(req.sellerName());
+        e.setCategoria(req.categoria());
+        e.setCondicao(req.condicao());
+        e.setCidade(req.cidade());
+        e.setEstado(req.estado());
+        ProductEntity saved = repository.save(e);
+        return ResponseEntity.ok(toDTO(saved, saved.getPrice()));
+    }
+
+    // ── helpers ──────────────────────────────────────────────────────────────────
+
+    private double convertPrice(ProductEntity e) {
+        if (e.getCurrency() == null || e.getCurrency().equals("BRL")) return e.getPrice();
+        return Math.round(e.getPrice() * USD_TO_BRL_FALLBACK * 100.0) / 100.0;
+    }
+
+    private ProductDTO toDTO(ProductEntity e, Double convertedPrice) {
+        return new ProductDTO(
+                e.getId(),
+                e.getDescription(),
+                e.getBrand(),
+                e.getModel(),
+                e.getCurrency(),
+                e.getPrice(),
+                e.getStock(),
+                convertedPrice,
+                "product-service:" + port,
+                "BRL",
+                e.getSellerId(),
+                e.getSellerName(),
+                e.getCategoria(),
+                e.getCondicao(),
+                e.getCidade(),
+                e.getEstado()
+        );
     }
 
     @ExceptionHandler(Exception.class)
-    public ResponseEntity<String> handleException(Exception e){
-        String message = e.getMessage().replace("/r/n", "");
-        return ResponseEntity.badRequest().body(message);
+    public ResponseEntity<String> handleException(Exception e) {
+        return ResponseEntity.badRequest().body(e.getMessage().replace("/r/n", ""));
     }
-
 }
