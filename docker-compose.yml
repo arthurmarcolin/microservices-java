@@ -1,168 +1,143 @@
+volumes:
+  db-product-data:
+  db-currency-data:
+  db-user-data:
+  db-order-data:
+
 services:
 
-  # ── Banco de dados ──────────────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: eletrohub-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── 1. Discovery Service (Eureka) ───────────────────────────────────────────
+  # -------------------------------
   discovery-service:
-    build: ./discovery-service
-    container_name: discovery-service
+    image: discovery-service:latest
+    build:
+      context: ./discovery-service
     ports:
       - "8761:8761"
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8761/actuator/health || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 8
-      start_period: 40s
+    
+  # -------------------------------
+  #config-service:
+  #  image: config-service:latest
+  #  build:
+  #    context: ./config-service
+  #  depends_on:
+  #    - discovery-service
+  #  environment:
+  #    EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
+  
+  # -------------------------------
+  #greeting-service:
+  #  image: greeting-service:latest
+  #  build:
+  #    context: ./greeting-service
+  #  depends_on:
+  #    - discovery-service
+  #    - config-service
+  #  environment:
+  #    EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE: http://discovery-service:8761/eureka
+  #    SPRING_CONFIG_IMPORT: optional:configserver:http://config-service:8888
 
-  # ── 2. Config Service ───────────────────────────────────────────────────────
-  config-service:
-    build: ./config-service
-    container_name: config-service
-    ports:
-      - "8888:8888"
+  # -------------------------------
+  db-currency:
+    image: postgres:16
     environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
+      POSTGRES_DB: db_currency
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postegres
+    volumes:
+      - db-currency-data:/var/lib/postgresql/data
+      
+  currency-service:
+    image: currency-service:latest
+    build:
+      context: ./currency-service
     depends_on:
-      discovery-service:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8888/actuator/health || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+      - discovery-service
+      - db-currency
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-currency:5432/db_currency
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postegres
+    command: ["java", "-jar", "app.jar", "--eureka.client.service-url.defaultZone=http://discovery-service:8761/eureka"]
+    
+  # -------------------------------
+  db-product:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: db_product
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postegres
+    volumes:
+      - db-product-data:/var/lib/postgresql/data
+    
+  product-service:
+    image: product-service:latest
+    build:
+      context: ./product-service
+    depends_on:
+      - discovery-service
+      - db-product
+      - currency-service
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-product:5432/db_product
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postegres
+    command: ["java", "-jar", "app.jar", "--eureka.client.service-url.defaultZone=http://discovery-service:8761/eureka"]
 
-  # ── 3. Gateway Service ──────────────────────────────────────────────────────
+  # -------------------------------
+  db-user:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: db_user
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postegres
+    volumes:
+      - db-user-data:/var/lib/postgresql/data
+    
+  auth-service:
+    image: auth-service:latest
+    build:
+      context: ./auth-service
+    depends_on:
+      - discovery-service
+      - db-user
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-user:5432/db_user
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postegres
+    command: ["java", "-jar", "app.jar", "--eureka.client.service-url.defaultZone=http://discovery-service:8761/eureka"]
+    
+  # -------------------------------
+  db-order:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: db_order
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postegres
+    volumes:
+      - db-order-data:/var/lib/postgresql/data
+    
+  order-service:
+    image: order-service:latest
+    build:
+      context: ./order-service
+    depends_on:
+      - discovery-service
+      - db-order
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db-order:5432/db_order
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postegres
+    command: ["java", "-jar", "app.jar", "--eureka.client.service-url.defaultZone=http://discovery-service:8761/eureka"]
+    
+  # -------------------------------
   gateway-service:
-    build: ./gateway-service
-    container_name: gateway-service
+    image: gateway-service:latest
+    build:
+      context: ./gateway-service
     ports:
       - "8765:8765"
-    environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
     depends_on:
-      discovery-service:
-        condition: service_healthy
-
-  # ── 4. Greeting Service ─────────────────────────────────────────────────────
-  greeting-service:
-    build: ./greeting-service
-    container_name: greeting-service
-    environment:
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-      SPRING_CONFIG_IMPORT: optional:configserver:http://config-service:8888
-    depends_on:
-      discovery-service:
-        condition: service_healthy
-      config-service:
-        condition: service_healthy
-
-  # ── 5. Auth Service ─────────────────────────────────────────────────────────
-  auth-service:
-    build: ./auth-service
-    container_name: auth-service
-    ports:
-      - "8900:8900"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/db_user
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-    depends_on:
-      postgres:
-        condition: service_healthy
-      discovery-service:
-        condition: service_healthy
-
-  # ── 6. Currency Service ─────────────────────────────────────────────────────
-  currency-service:
-    build: ./currency-service
-    container_name: currency-service
-    ports:
-      - "8100:8100"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/db_currency
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-    depends_on:
-      postgres:
-        condition: service_healthy
-      discovery-service:
-        condition: service_healthy
-
-  # ── 7. Product Service ──────────────────────────────────────────────────────
-  product-service:
-    build: ./product-service
-    container_name: product-service
-    ports:
-      - "8000:8000"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bd_product
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-    depends_on:
-      postgres:
-        condition: service_healthy
-      discovery-service:
-        condition: service_healthy
-      currency-service:
-        condition: service_started
-
-  # ── 8. Order Service ────────────────────────────────────────────────────────
-  order-service:
-    build: ./order-service
-    container_name: order-service
-    ports:
-      - "8300:8300"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bd_orders
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-    depends_on:
-      postgres:
-        condition: service_healthy
-      discovery-service:
-        condition: service_healthy
-      product-service:
-        condition: service_started
-
-  # ── 9. Marketplace Service ──────────────────────────────────────────────────
-  marketplace-service:
-    build: ./marketplace-service
-    container_name: marketplace-service
-    ports:
-      - "8200:8200"
-    environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/bd_marketplace
-      SPRING_DATASOURCE_USERNAME: postgres
-      SPRING_DATASOURCE_PASSWORD: postgres
-      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka
-    depends_on:
-      postgres:
-        condition: service_healthy
-      discovery-service:
-        condition: service_healthy
-
-volumes:
-  pgdata:
+      - discovery-service
+    command: ["java", "-jar", "app.jar", "--eureka.client.service-url.defaultZone=http://discovery-service:8761/eureka"]
+    
+# -------------------------------
