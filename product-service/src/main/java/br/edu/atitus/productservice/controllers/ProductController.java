@@ -6,9 +6,9 @@ import br.edu.atitus.productservice.dtos.ProductCreateRequest;
 import br.edu.atitus.productservice.dtos.ProductDTO;
 import br.edu.atitus.productservice.entities.ProductEntity;
 import br.edu.atitus.productservice.repositories.ProductRepository;
-import org.hibernate.query.Page;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.CacheManager;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.web.PageableDefault;
@@ -67,8 +67,13 @@ public class ProductController {
         } else {
             String nameCache = "ConvertedValue";
             String keyCache = entity.getCurrency() + "-" + targetCurrency;
-            Double convertedValue = null;
-            if (convertedValue == null) {
+            Double cachedRate = cacheManager.getCache(nameCache) != null
+                    ? (Double) cacheManager.getCache(nameCache).get(keyCache, Double.class)
+                    : null;
+            if (cachedRate != null) {
+                convertedPrice = cachedRate * entity.getPrice();
+                environment = environment + " - Currency in cache";
+            } else {
                 CurrencyResponse currency = currencyClient.getCurrency(entity.getCurrency(), targetCurrency);
                 if (currency != null) {
                     convertedPrice = entity.getPrice() * currency.conversionRate();
@@ -78,9 +83,6 @@ public class ProductController {
                     convertedPrice = -1.0;
                     environment = environment + " - Currency Fallback";
                 }
-            } else {
-                convertedPrice = convertedValue * entity.getPrice();
-                environment = environment + " - Currency in cache";
             }
         }
 
@@ -149,6 +151,7 @@ public class ProductController {
                 e.getCurrency(),
                 e.getPrice(),
                 e.getStock(),
+                e.getImageURL(),
                 convertedPrice,
                 "product-service:" + port,
                 "BRL",
@@ -176,13 +179,19 @@ public class ProductController {
                 product.getImageURL(),
                 -1.,
                 "Product-service running on port: " + port,
-                null
+                null,
+                product.getSellerId(),
+                product.getSellerName(),
+                product.getCategoria(),
+                product.getCondicao(),
+                product.getCidade(),
+                product.getEstado()
         );
 
         return ResponseEntity.ok(dto);
     }
 
-    @GetMapping
+    @GetMapping("/paginated")
     public ResponseEntity<Page<ProductDTO>> getAllProducts(
             @RequestParam String targetCurrency,
             @PageableDefault(
@@ -204,52 +213,24 @@ public class ProductController {
                 convertedPrice = product.getPrice();
 
             } else {
-
                 String nameCache = "ConvertedValue";
                 String keyCache = product.getCurrency() + "-" + targetCurrency;
-
-                Double convertedValue = null;
-
-                if (convertedValue == null) {
-
-                    CurrencyResponse currency =
-                            currencyClient.getCurrency(
-                                    product.getCurrency(),
-                                    targetCurrency
-                            );
-
-                    if (currency != null) {
-
-                        convertedPrice =
-                                currency.conversionRate() *
-                                        product.getPrice();
-
-                        environment =
-                                environment +
-                                        " - " +
-                                        currency.environment();
-
-                        cacheManager
-                                .getCache(nameCache)
-                                .put(keyCache, currency.conversionRate());
-
-                    } else {
-
-                        convertedPrice = -1.0;
-                        environment =
-                                environment +
-                                        " - Currency Fallback";
-                    }
-
+                Double cachedRate = cacheManager.getCache(nameCache) != null
+                        ? (Double) cacheManager.getCache(nameCache).get(keyCache, Double.class)
+                        : null;
+                if (cachedRate != null) {
+                    convertedPrice = cachedRate * product.getPrice();
+                    environment = environment + " - Currency in cache";
                 } else {
-
-                    convertedPrice =
-                            convertedValue *
-                                    product.getPrice();
-
-                    environment =
-                            environment +
-                                    " - Currency in cache";
+                    CurrencyResponse currency = currencyClient.getCurrency(product.getCurrency(), targetCurrency);
+                    if (currency != null) {
+                        convertedPrice = currency.conversionRate() * product.getPrice();
+                        environment = environment + " - " + currency.environment();
+                        cacheManager.getCache(nameCache).put(keyCache, currency.conversionRate());
+                    } else {
+                        convertedPrice = -1.0;
+                        environment = environment + " - Currency Fallback";
+                    }
                 }
             }
 
@@ -264,7 +245,13 @@ public class ProductController {
                     product.getImageURL(),
                     convertedPrice,
                     environment,
-                    targetCurrency
+                    targetCurrency,
+                    product.getSellerId(),
+                    product.getSellerName(),
+                    product.getCategoria(),
+                    product.getCondicao(),
+                    product.getCidade(),
+                    product.getEstado()
             );
         });
 
